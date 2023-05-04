@@ -3,7 +3,7 @@ title: 拒绝重复代码，高效摸鱼！！
 shortTitle: VSCODE代码片段
 icon: vscode
 author: zzzzzxm
-date: 2023-04-26 26:24:01
+date: 2023-04-26 16:24:01
 isOriginal: true
 sticky: false
 star: false
