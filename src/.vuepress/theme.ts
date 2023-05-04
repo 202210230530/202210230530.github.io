@@ -103,7 +103,7 @@ export default hopeTheme({
 
   encrypt: {
     config: {
-      "/work/token/*.html": ["1234"],
+      "/work/token/": ["123qwe"],
     },
   },
 
