@@ -1,0 +1,1 @@
+const e=JSON.parse('{"key":"v-48f7617b","path":"/work/token/","title":"Token","lang":"zh-CN","frontmatter":{"title":"Token","article":false,"feed":false,"sitemap":false,"seo":false,"head":[]},"headers":[],"git":{},"readingTime":{"minutes":0.03,"words":10},"filePathRelative":null,"copyright":{"author":"Zzzzzxm"}}');export{e as data};
