@@ -1,6 +1,6 @@
 ---
-title: OpenLayers3加载离线Google地图
-shortTitle: OpenLayers3加载离线Google地图
+title: OpenLayers加载离线Google地图
+shortTitle: OpenLayers加载离线Google地图
 icon: javascript
 author: zzzzzxm
 date: 2023-05-06 15:37:20
@@ -68,166 +68,117 @@ color: #096DD9
 ### **2.离线瓦片服务搭建**
 
 **1. 首先要把下载好的瓦片搞到内网服务器上面。**
-我需要干啥呢？
 
-- [x] **把已经下载的文件同步到内网服务器**
-- [x] **有新文件接入后自动同步到服务器**
+**2. 使用 nginx 代理的方式将这些瓦片做成可以通过 http 链接`/offlineMapTiles/{z}/{x}/{y}.png`访问的服务。**
 
-咋整呢？写个脚本搞定就成！:thumbsup:  
-作为摸:fish:老手，自己写脚本岂不是太 `low `了，这次我们**让`ChatGPT`为我们打工**写个脚本
+:::: details nginx 配置文件
 
-:::: details GPT 生成脚本
-Q: 请用 java 实现一个脚本，1.要求自动将 window 指定目录下的文件同步到 linux 服务器上。2.要求监听当前目录，有新文件时自动同步文件 3.脚本参数要求 window 目录可配置、linux 目录可配置
+```sh
+user  root;
+#设置工作进程数 一般为 Cpu 核心*2  4*2
+worker_processes  24;
+# 日志输出参数
+error_log  /var/log/nginx/error.log;
+# 进程ID
+#pid        logs/nginx.pid;
 
-A: 正在为您搜索：java 实现脚本、window 目录、linux 服务器、文件同步
+events {
+    #指定运行模型
+    use epoll;
+    # 工作连接数  默认512 根据自己的情况调整
+    worker_connections  1024;
+}
 
-很高兴回答您的问题。根据您提供的要求，可以使用 Java 编写一个脚本来同步文件。
+#http模块
+http {
+    #能够支持的类型 在 这个文件下写着  mime.types
+    include       mime.types;
+    default_type  application/octet-stream;
+    #关闭访问日志记录
+    access_log  off;
+    #启动 发送文件
+    sendfile        on;
+    #连接超时时间
+    keepalive_timeout  65;
+    # 开启压缩文件
+    #gzip  on;
 
-首先，使用 Java 中的 SFTP 库实现将文件从 Windows 同步到 Linux 服务器上。我们可以使用 JSch 库（[1]）来连接 Linux 服务器并上传文件。
+    server {
+        listen       80;
+        server_name  localhost;
+        access_log  off;
 
-接着，我们需要在 Windows 上监听目录的变化。我们可以使用 Java 标准库中的 WatchService 类实现（[2]）。
-
-最后，在程序启动时，我们可以读取命令行参数以获取 Windows 和 Linux 目录的路径。这可以使用 Java 中的 Args4j 库（[3]）来实现。
-
-示例代码如下：
-
-```java
-import com.jcraft.jsch.*;
-import org.kohsuke.args4j.CmdLineException;
-import org.kohsuke.args4j.CmdLineParser;
-
-import java.io.IOException;
-import java.nio.file.*;
-
-public class FileSync {
-
-    private static final int PORT = 22;
-
-    private enum OS {
-        WINDOWS,
-        LINUX
-    }
-
-    private OS os;
-    private Path windowsPath;
-    private String linuxUser;
-    private String linuxHost;
-    private Path linuxPath;
-
-    public static void main(String[] args) throws IOException {
-        FileSync fileSync = new FileSync();
-        fileSync.parseArgs(args);
-        fileSync.watchDirectory();
-    }
-
-    private void parseArgs(String[] args) {
-        FileSyncOptions options = new FileSyncOptions();
-        CmdLineParser parser = new CmdLineParser(options);
-
-        try {
-            parser.parseArgument(args);
-        } catch (CmdLineException e) {
-            System.err.println(e.getMessage());
-            parser.printUsage(System.err);
-            System.exit(1);
+        location /tiles {
+#----------------------------------------------------需要调整路径
+            alias   /map/;
+            # 开启自动索引
+            autoindex on;
+	        index  index.html index.htm;
         }
 
-        windowsPath = Paths.get(options.getWindowsPath());
-        linuxUser = options.getLinuxUser();
-        linuxHost = options.getLinuxHost();
-        linuxPath = Paths.get(options.getLinuxPath());
 
-        if (System.getProperty("os.name").startsWith("Windows")) {
-            os = OS.WINDOWS;
-        } else {
-            os = OS.LINUX;
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
         }
     }
 
-    private void watchDirectory() throws IOException {
-        WatchService watchService = FileSystems.getDefault().newWatchService();
-        windowsPath.register(watchService, StandardWatchEventKinds.ENTRY_CREATE);
-
-        while (true) {
-            WatchKey key;
-            try {
-                key = watchService.take();
-            } catch (InterruptedException e) {
-                return;
-            }
-
-            for (WatchEvent<?> event : key.pollEvents()) {
-                Path filePath = windowsPath.resolve((Path) event.context());
-                syncFile(filePath.toString());
-            }
-
-            key.reset();
-        }
-    }
-
-    private void syncFile(String filePath) {
-        String destinationFilePath;
-
-        if (os == OS.WINDOWS) {
-            destinationFilePath = constructRemotePath(linuxPath, filePath);
-        } else {
-            destinationFilePath = linuxPath.resolve(filePath).toString();
-        }
-
-        JSch jsch = new JSch();
-        Session session = null;
-        ChannelSftp channel = null;
-
-        try {
-            session = jsch.getSession(linuxUser, linuxHost, PORT);
-            session.setConfig("StrictHostKeyChecking", "no");
-            session.connect();
-
-            channel = (ChannelSftp) session.openChannel("sftp");
-            channel.connect();
-
-            channel.put(filePath, destinationFilePath);
-        } catch (JSchException | SftpException e) {
-            System.err.println("Failed to sync file: " + filePath);
-            System.err.println(e.getMessage());
-        } finally {
-            if (channel != null) {
-                channel.disconnect();
-            }
-
-            if (session != null) {
-                session.disconnect();
-            }
-        }
-    }
-
-    private String constructRemotePath(Path remoteDir, String filePath) {
-        Path fileName = Paths.get(filePath).getFileName();
-        return remoteDir.resolve(fileName).toString();
-    }
 }
 
 ```
 
-您可以使用以下命令行参数来运行：
-
-```sh
-java FileSync --windows-path "C:\path\to\directory" --linux-user user --linux-host host --linux-path "/path/to/directory"
-```
-
-其中，`--windows-path`指定 Windows 目录的路径，`--linux-user`和`--linux-host`指定 Linux 服务器的登录用户名和主机名，`--linux-path`指定 Linux 目录的路径。
-
-希望这能帮到您！
 ::::
-
-OK! 那我们试一下好不好用！ 不好用，下次再调试！
-
-**2.使用 nginx 代理的方式将这些瓦片做成可以通过 http 链接`/offlineMapTiles/{z}/{x}/{y}.png`访问的服务**
-
-我的 nginx 配置文件说明
 
 ### **3.OpenLayers3 加载离线 Google 地图**
 
-### **4.绘制区域**
+搭建好离线瓦片服务之后，使用 OpenLayers 加载离线地图就非常简单了
 
-### **5.区域监控**
+::: details 代码示例
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Openlayers接入离线地图瓦片示例</title>
+    <link rel="stylesheet" href="../css/demo.css" />
+    <script src="../lib/openlayers/ol.js"></script>
+  </head>
+
+  <body>
+    <div id="map" class="map"></div>
+    <script>
+      const mapTilesURL = "http://ip:port/tiles/{z}/{x}/{y}/tile.png" //瓦片服务请求地址
+      const mapCenter = [116.403926, 39.919778] //地图中心 天安门附近
+      const map = new ol.Map({
+        target: "map",
+        layers: [
+          new ol.layer.Tile({
+            source: new ol.source.XYZ({
+              url: mapTilesURL,
+            }),
+          }),
+        ],
+        view: new ol.View({
+          center: ol.proj.transform(mapCenter, "EPSG:4326", "EPSG:3857"), //地图中心
+          zoom: 6, //地图当前层级
+          maxZoom: 18, //最大层级
+        }),
+      })
+    </script>
+  </body>
+</html>
+```
+
+:::
+
+### **4.接入效果展示**
+
+:point_down::point_down::point_down:  
+![](https://raw.githubusercontent.com/202210230530/blog-images/master/blog-images/20230904111206.png)
+
+### **5.OpenLayers 地图操作用例**
+
+[OpenLayers 地图用例](./OpenLayers地图用例.html)  
+[OpenLayers 亿级节点渲染方案](./OpenLayers亿级节点渲染方案.html)
